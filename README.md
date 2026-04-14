@@ -101,6 +101,34 @@ Supported placeholders in `launch.scriptArgs`, `launch.scriptPath`, `launch.cwd`
 - `{buildUniqueId}`
 - `{mode}`
 
+## One-click launch setup (recommended)
+
+This repo includes:
+
+- `start_server.sh` - wrapper script the API can launch
+- `admin_launch_payload.json` - copy-paste payload template for `POST /sessions`
+
+On Ubuntu, copy `start_server.sh` to your API folder and make it executable:
+
+```bash
+chmod +x /home/ubuntu/SessionRegistryApi/start_server.sh
+```
+
+For your build location from Windows (`C:\Users\ZeroR\Documents\GAMEBUILD\LinuxServer`), after transfer/extract on Ubuntu the equivalent root is typically:
+
+- `/home/ubuntu/OpenXrMpServer/LinuxServer`
+
+Set this through launch env (`OPENXR_SERVER_ROOT`) as shown in `admin_launch_payload.json`.
+
+If you create sessions from `/admin`, use these values:
+
+- `Launch Script Path` -> `/home/ubuntu/SessionRegistryApi/start_server.sh`
+- `Script Interpreter` -> `/bin/bash`
+- `Launch Working Dir` -> `/home/ubuntu/SessionRegistryApi`
+- `Script Args (JSON)` -> `["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]`
+
+Then create a session row; registry will launch the script and return `launchPid`/`launchStatus` in API responses.
+
 Admin list response (richer metadata):
 
 ```json

@@ -1,0 +1,28 @@
+﻿{
+  "serverName": "Teacher Session",
+  "ownerName": "On-Prem Server",
+  "connectAddress": "10.0.0.25",
+  "connectPort": 7777,
+  "maxPlayers": 16,
+  "currentPlayers": 0,
+  "buildUniqueId": 1,
+  "mode": "dedicated",
+  "map": "/Game/VRTemplate/VRTemplateMap",
+  "launch": {
+    "scriptPath": "/home/ubuntu/SessionRegistryApi/start_server.sh",
+    "scriptInterpreter": "/bin/bash",
+    "cwd": "/home/ubuntu/SessionRegistryApi",
+    "scriptArgs": [
+      "{connectPort}",
+      "{map}",
+      "{maxPlayers}",
+      "{serverName}",
+      "{sessionId}"
+    ],
+    "env": {
+      "OPENXR_SERVER_ROOT": "/home/ubuntu/OpenXrMpServer/LinuxServer",
+      "OPENXR_LOG_DIR": "/home/ubuntu/OpenXrMpServer/logs"
+    }
+  }
+}
+
