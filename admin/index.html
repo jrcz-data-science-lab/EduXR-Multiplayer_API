@@ -1,0 +1,205 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenXrMp Session Admin</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; background: #f7f7f7; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    label { display: inline-block; width: 160px; }
+    input { margin: 4px 0; padding: 6px; width: 260px; }
+    button { padding: 6px 10px; margin-right: 8px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+    th { background: #f1f1f1; }
+    .stale { color: #b00020; font-weight: 700; }
+    .ok { color: #0a7a2e; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h2>OpenXrMp Dedicated Session Admin</h2>
+
+  <div class="card">
+    <div><label>API Base URL</label><input id="baseUrl" /></div>
+    <div><label>Bearer Token</label><input id="token" type="password" /></div>
+    <button id="refreshBtn">Refresh</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="card">
+    <h3>Create Session + Launch Server</h3>
+    <div><label>Server Name</label><input id="serverName" value="Teacher Session" /></div>
+    <div><label>Owner Name</label><input id="ownerName" value="On-Prem Server" /></div>
+    <div><label>Connect Address</label><input id="connectAddress" value="127.0.0.1" /></div>
+    <div><label>Connect Port</label><input id="connectPort" value="7777" /></div>
+    <div><label>Map</label><input id="mapName" value="/Game/VRTemplate/VRTemplateMap" /></div>
+    <div><label>Max Players</label><input id="maxPlayers" value="16" /></div>
+    <hr />
+    <div><label>Launch Script Path</label><input id="launchScriptPath" placeholder="/home/ubuntu/OpenXrMp/start_server.sh" /></div>
+    <div><label>Script Interpreter</label><input id="launchInterpreter" value="/bin/bash" /></div>
+    <div><label>Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu/OpenXrMp" /></div>
+    <div><label>Script Args (JSON)</label><input id="launchArgs" value='["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]' /></div>
+    <button id="createBtn">Create</button>
+  </div>
+
+  <div class="card">
+    <h3>Sessions</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Server</th>
+          <th>Connect</th>
+          <th>Players</th>
+          <th>Created</th>
+          <th>Last Heartbeat</th>
+          <th>Stale Age (s)</th>
+          <th>Launch</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const statusEl = byId("status");
+
+    function getBaseUrl() {
+      const value = byId("baseUrl").value.trim();
+      return value || window.location.origin;
+    }
+
+    function getHeaders() {
+      const headers = { "Accept": "application/json" };
+      const token = byId("token").value.trim();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      return headers;
+    }
+
+    async function requestJson(path, options = {}) {
+      const url = `${getBaseUrl()}${path}`;
+      const opts = { ...options, headers: { ...(options.headers || {}), ...getHeaders() } };
+      const response = await fetch(url, opts);
+      const bodyText = await response.text();
+      let payload = {};
+      try { payload = bodyText ? JSON.parse(bodyText) : {}; } catch (_) {}
+      if (!response.ok) {
+        const err = payload.error || `${response.status} ${response.statusText}`;
+        throw new Error(err);
+      }
+      return payload;
+    }
+
+    function setStatus(text, good = true) {
+      statusEl.textContent = text;
+      statusEl.className = good ? "ok" : "stale";
+    }
+
+    function renderRows(sessions) {
+      const tbody = byId("rows");
+      tbody.innerHTML = "";
+      for (const row of sessions) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${row.serverName || ""}</td>
+          <td>${row.connectString || ""}</td>
+          <td>${row.currentPlayers || 0}/${row.maxPlayers || 0}</td>
+          <td>${row.createdAt || ""}</td>
+          <td>${row.lastHeartbeatAt || ""}</td>
+          <td>${row.staleAgeSeconds ?? ""}</td>
+          <td>${row.launchStatus || ""}${row.launchPid ? ` (pid ${row.launchPid})` : ""}</td>
+          <td class="${row.isStale ? "stale" : "ok"}">${row.isStale ? "STALE" : "OK"}</td>
+          <td><button data-delete="${row.sessionId}">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      tbody.querySelectorAll("button[data-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await requestJson(`/sessions/${btn.dataset.delete}`, { method: "DELETE" });
+            await refresh();
+          } catch (err) {
+            setStatus(`Delete failed: ${err.message}`, false);
+          }
+        });
+      });
+    }
+
+    async function refresh() {
+      try {
+        const payload = await requestJson("/admin/sessions", { method: "GET" });
+        renderRows(payload.sessions || []);
+        setStatus(`Loaded ${payload.sessions ? payload.sessions.length : 0} sessions`);
+      } catch (err) {
+        setStatus(`Refresh failed: ${err.message}`, false);
+      }
+    }
+
+    async function createSession() {
+      let parsedArgs = [];
+      const rawArgs = byId("launchArgs").value.trim();
+      if (rawArgs) {
+        try {
+          const candidate = JSON.parse(rawArgs);
+          if (!Array.isArray(candidate)) {
+            throw new Error("must be a JSON array");
+          }
+          parsedArgs = candidate.map((item) => String(item));
+        } catch (err) {
+          setStatus(`Invalid launch args JSON: ${err.message}`, false);
+          return;
+        }
+      }
+
+      const payload = {
+        serverName: byId("serverName").value.trim(),
+        ownerName: byId("ownerName").value.trim(),
+        connectAddress: byId("connectAddress").value.trim(),
+        connectPort: Number(byId("connectPort").value || "7777"),
+        map: byId("mapName").value.trim() || "/Game/VRTemplate/VRTemplateMap",
+        maxPlayers: Number(byId("maxPlayers").value || "16"),
+        currentPlayers: 0,
+        buildUniqueId: 1,
+        mode: "dedicated",
+        launch: {
+          scriptPath: byId("launchScriptPath").value.trim(),
+          scriptInterpreter: byId("launchInterpreter").value.trim(),
+          cwd: byId("launchCwd").value.trim(),
+          scriptArgs: parsedArgs
+        }
+      };
+
+      if (!payload.launch.scriptPath) {
+        delete payload.launch;
+      }
+
+      try {
+        const created = await requestJson("/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (created.launchStatus) {
+          setStatus(`Created ${created.serverName || "session"} (${created.launchStatus})`);
+        }
+        await refresh();
+      } catch (err) {
+        setStatus(`Create failed: ${err.message}`, false);
+      }
+    }
+
+    byId("baseUrl").value = window.location.origin;
+    byId("refreshBtn").addEventListener("click", refresh);
+    byId("createBtn").addEventListener("click", createSession);
+    refresh();
+  </script>
+</body>
+</html>
+
