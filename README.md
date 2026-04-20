@@ -17,7 +17,7 @@ Lifecycle behavior:
 
 - `POST /sessions/{sessionId}/heartbeat` updates `lastHeartbeatAt`.
 - `POST /sessions/{sessionId}/players` also refreshes heartbeat and updates player counts.
-- Process-launched sessions refresh heartbeat automatically while the process is still running.
+- Process-launched sessions stay discoverable while the launched process is still running.
 - `DELETE /sessions/{sessionId}` removes the row and terminates the launched process (if present).
 - Optional create controls:
   - `lifecyclePolicy: "manual"` (default) -> keep running until manually stopped/deleted.
@@ -126,10 +126,7 @@ Update player count explicitly:
 
 ## One-click launch setup (recommended)
 
-This repo includes:
-
-- `start_server.sh` - wrapper script the API can launch
-- `admin_launch_payload.json` - copy-paste payload template for `POST /sessions`
+The admin panel can launch your Linux server wrapper directly.
 
 On Ubuntu, copy `start_server.sh` to your API folder and make it executable:
 
@@ -141,7 +138,7 @@ For your build location from Windows (`C:\Users\ZeroR\Documents\GAMEBUILD\LinuxS
 
 - `/home/ubuntu/OpenXrMpServer/LinuxServer`
 
-Set this through launch env (`OPENXR_SERVER_ROOT`) as shown in `admin_launch_payload.json`.
+Set this through launch env (`OPENXR_SERVER_ROOT`) in the admin form if needed.
 
 If you create sessions from `/admin`, use these values:
 
@@ -150,8 +147,14 @@ If you create sessions from `/admin`, use these values:
 - `Launch Working Dir` -> `/home/ubuntu/SessionRegistryApi`
 - `Server File Path (Linux)` -> `/home/ubuntu/OpenXrMpServer/LinuxServer/OpenXrMpServer.sh` (optional)
 - `Script Args (JSON)` -> `["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]`
+- `Lifecycle` -> `Run 24/7` for manual shutdown, or uncheck it to auto-close when empty
+- `Auto-close idle timeout (seconds)` -> how long the server can stay empty before shutdown
+
+If you need to launch the dedicated server binary directly, the admin form now sends the Linux server path as `launch.env.OPENXR_SERVER_SCRIPT`.
 
 Then create a session row; registry will launch the script and return `launchPid`/`launchStatus` in API responses.
+
+The admin panel no longer uses a separate payload template file; the form fields now build the request directly.
 
 Admin list response (richer metadata):
 
@@ -227,6 +230,27 @@ List response:
   ]
 }
 ```
+
+## Unreal runtime player updates
+
+Use the new player-count endpoint from the dedicated server when players join or leave:
+
+```http
+POST /sessions/{sessionId}/players
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+Example body:
+
+```json
+{
+  "currentPlayers": 5,
+  "maxPlayers": 16
+}
+```
+
+This updates the server's authoritative player count and refreshes the session heartbeat at the same time.
 
 ## Test
 
