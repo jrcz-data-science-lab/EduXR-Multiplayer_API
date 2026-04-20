@@ -12,6 +12,15 @@ Small on-prem registry API for dedicated server discovery.
 - `GET /admin` - simple HTML admin panel.
 - `GET /admin/sessions` - rich admin session view (`createdAt`, `lastHeartbeatAt`, `staleAgeSeconds`, `isStale`).
 
+Lifecycle behavior:
+
+- `POST /sessions/{sessionId}/heartbeat` updates `lastHeartbeatAt`.
+- Process-launched sessions refresh heartbeat automatically while the process is still running.
+- `DELETE /sessions/{sessionId}` removes the row and terminates the launched process (if present).
+- Optional create controls:
+  - `lifecyclePolicy: "manual"` (default) -> keep running until manually stopped/deleted.
+  - `lifecyclePolicy: "auto_close_when_empty"` -> stop + remove after `idleTimeoutSeconds` where `currentPlayers == 0`.
+
 This matches the dedicated flow in `XrMpGameInstance` where:
 
 - Host calls `POST /sessions`
@@ -31,6 +40,7 @@ Environment variable equivalents:
 - `SESSION_REGISTRY_TOKEN`
 - `SESSION_REGISTRY_TTL_SECONDS`
 - `SESSION_REGISTRY_CLEANUP_INTERVAL`
+- `SESSION_REGISTRY_IDLE_SHUTDOWN_SECONDS`
 
 ## Unreal setup
 
@@ -70,6 +80,8 @@ Create + launch server script in one request:
   "connectPort": 7777,
   "maxPlayers": 16,
   "map": "/Game/VRTemplate/VRTemplateMap",
+  "lifecyclePolicy": "auto_close_when_empty",
+  "idleTimeoutSeconds": 900,
   "launch": {
     "scriptPath": "/home/ubuntu/OpenXrMp/start_server.sh",
     "scriptInterpreter": "/bin/bash",

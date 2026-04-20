@@ -95,6 +95,15 @@
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
 
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      padding: 0;
+      accent-color: var(--accent);
+      box-shadow: none;
+    }
+
     input:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(70, 212, 255, 0.18);
@@ -207,6 +216,21 @@
       background: rgba(169, 51, 88, 0.2);
       border-color: rgba(255, 95, 135, 0.5);
     }
+
+    .toggle-row {
+      grid-column: 1 / -1;
+      border: 1px solid rgba(42, 73, 106, 0.8);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: rgba(12, 23, 39, 0.6);
+    }
+
+    .toggle-inline {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+    }
   </style>
 </head>
 <body>
@@ -238,8 +262,19 @@
       <div class="form-grid">
         <div class="form-row"><label for="launchScriptPath">Launch Script Path</label><input id="launchScriptPath" placeholder="/home/ubuntu-2/Documents/EduXrMultiplayer_API/start_server.sh" value="/home/ubuntu-2/Documents/EduXrMultiplayer_API/start_server.sh" /></div>
         <div class="form-row"><label for="launchInterpreter">Script Interpreter</label><input id="launchInterpreter" value="/bin/bash" /></div>
-        <div class="form-row"><label for="launchCwd">Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu-2/Documents/EduXrMultiplayer_API" value="/home/ubuntu-2/Documents/EduXrMultiplayer_API" /></div>
+        <div class="form-row"><label for="launchCwd">Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu-2/Documents/EduXrMultiplayer_API/" value="/home/ubuntu-2/Documents/EduXrMultiplayer_API/" /></div>
         <div class="form-row"><label for="launchArgs">Script Args (JSON)</label><input id="launchArgs" value='["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]' /></div>
+        <div class="form-row toggle-row">
+          <label for="runNonstop">Server Lifecycle</label>
+          <div class="toggle-inline">
+            <input id="runNonstop" type="checkbox" checked />
+            <span class="muted">Run 24/7 until manually stopped (uncheck to auto-close when empty)</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <label for="idleTimeoutSeconds">Auto-close idle timeout (seconds)</label>
+          <input id="idleTimeoutSeconds" type="number" min="1" step="10" value="900" />
+        </div>
       </div>
       <div class="toolbar">
         <button id="createBtn" class="btn primary">Create Session</button>
@@ -306,6 +341,10 @@
       statusEl.className = `status-text ${good ? "ok" : "stale"}`;
     }
 
+    function syncLifecycleInputs() {
+      byId("idleTimeoutSeconds").disabled = byId("runNonstop").checked;
+    }
+
     function renderRows(sessions) {
       const tbody = byId("rows");
       tbody.innerHTML = "";
@@ -356,6 +395,7 @@
 
     async function createSession() {
       let parsedArgs = [];
+      const idleTimeoutSeconds = Math.max(1, Number(byId("idleTimeoutSeconds").value || "900"));
       const rawArgs = byId("launchArgs").value.trim();
       if (rawArgs) {
         try {
@@ -380,6 +420,8 @@
         currentPlayers: 0,
         buildUniqueId: 1,
         mode: "dedicated",
+        lifecyclePolicy: byId("runNonstop").checked ? "manual" : "auto_close_when_empty",
+        idleTimeoutSeconds,
         launch: {
           scriptPath: byId("launchScriptPath").value.trim(),
           scriptInterpreter: byId("launchInterpreter").value.trim(),
@@ -410,6 +452,8 @@
     byId("baseUrl").value = window.location.origin;
     byId("refreshBtn").addEventListener("click", refresh);
     byId("createBtn").addEventListener("click", createSession);
+    byId("runNonstop").addEventListener("change", syncLifecycleInputs);
+    syncLifecycleInputs();
     refresh();
   </script>
 </body>

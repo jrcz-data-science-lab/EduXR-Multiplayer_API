@@ -40,11 +40,15 @@ class SessionRecord:
     launch_command: str = ""
     launch_status: str = "not_launched"
     launch_exit_code: Optional[int] = None
+    lifecycle_policy: str = "manual"
+    idle_timeout_seconds: int = 900
+    empty_since_at: Optional[float] = None
 
 
 class SessionStore:
-    def __init__(self, ttl_seconds: int) -> None:
+    def __init__(self, ttl_seconds: int, default_idle_shutdown_seconds: int = 900) -> None:
         self._ttl_seconds = max(1, ttl_seconds)
+        self._default_idle_shutdown_seconds = max(1, default_idle_shutdown_seconds)
         self._lock = threading.Lock()
         self._sessions: Dict[str, SessionRecord] = {}
         self._processes: Dict[str, subprocess.Popen] = {}
@@ -63,6 +67,10 @@ class SessionStore:
         current_players = int(payload.get("currentPlayers") or 0)
         ping_ms = int(payload.get("pingMs") or -1)
         build_unique_id = int(payload.get("buildUniqueId") or 1)
+        lifecycle_policy = self._normalize_lifecycle_policy(payload.get("lifecyclePolicy"))
+        idle_timeout_seconds = int(payload.get("idleTimeoutSeconds") or self._default_idle_shutdown_seconds)
+        if idle_timeout_seconds < 1:
+            raise ValueError("idleTimeoutSeconds must be >= 1")
 
         connect_string = str(payload.get("connectString") or "")
         if not connect_string:
@@ -75,6 +83,7 @@ class SessionStore:
             raise ValueError("connectString or address/port is required")
 
         session_id = str(payload.get("sessionId") or uuid.uuid4())
+        now = time.time()
 
         record = SessionRecord(
             session_id=session_id,
@@ -87,9 +96,15 @@ class SessionStore:
             ping_ms=ping_ms,
             build_unique_id=build_unique_id,
             mode=mode,
+            created_at=now,
+            last_heartbeat_at=now,
+            lifecycle_policy=lifecycle_policy,
+            idle_timeout_seconds=idle_timeout_seconds,
+            empty_since_at=now if current_players <= 0 else None,
         )
 
         launch_spec = self._build_launch_spec(payload)
+        launched_process: Optional[subprocess.Popen] = None
         if launch_spec:
             launch_context = {
                 "sessionId": session_id,
@@ -105,6 +120,7 @@ class SessionStore:
                 "mode": mode,
             }
             process, command = self._launch_process(launch_spec, launch_context)
+            launched_process = process
             record.launch_pid = process.pid
             record.launch_command = command
             record.launch_status = "running" if process.poll() is None else "exited"
@@ -112,8 +128,8 @@ class SessionStore:
 
         with self._lock:
             self._sessions[session_id] = record
-            if launch_spec and record.launch_status == "running":
-                self._processes[session_id] = process
+            if launch_spec and record.launch_status == "running" and launched_process:
+                self._processes[session_id] = launched_process
 
         return record
 
@@ -142,12 +158,14 @@ class SessionStore:
             "generatedAt": utc_now_iso(),
         }
 
-    def heartbeat(self, session_id: str) -> Optional[SessionRecord]:
+    def heartbeat(self, session_id: str, payload: Optional[Dict[str, object]] = None) -> Optional[SessionRecord]:
         with self._lock:
             record = self._sessions.get(session_id)
             if not record:
                 return None
-            record.last_heartbeat_at = time.time()
+            now = time.time()
+            record.last_heartbeat_at = now
+            self._apply_runtime_update_locked(record, payload or {}, now)
             return record
 
     def delete(self, session_id: str) -> bool:
@@ -164,18 +182,67 @@ class SessionStore:
     def cleanup_expired(self) -> int:
         now = time.time()
         removed = 0
+        processes_to_terminate: List[subprocess.Popen] = []
         with self._lock:
             for record in self._sessions.values():
                 self._refresh_process_state_locked(record, now)
-            expired_ids = [
-                session_id for session_id, record in self._sessions.items()
-                if (now - record.last_heartbeat_at) > self._ttl_seconds
-            ]
+            expired_ids: List[str] = []
+            for session_id, record in self._sessions.items():
+                is_stale = (now - record.last_heartbeat_at) > self._ttl_seconds
+                is_idle_empty = (
+                    record.launch_status == "running"
+                    and record.lifecycle_policy == "auto_close_when_empty"
+                    and record.current_players <= 0
+                    and record.empty_since_at is not None
+                    and (now - record.empty_since_at) >= record.idle_timeout_seconds
+                )
+
+                if is_stale or is_idle_empty:
+                    expired_ids.append(session_id)
+                    if is_idle_empty:
+                        process = self._processes.get(session_id)
+                        if process:
+                            processes_to_terminate.append(process)
+
             for session_id in expired_ids:
                 del self._sessions[session_id]
                 self._processes.pop(session_id, None)
                 removed += 1
+
+        for process in processes_to_terminate:
+            self._terminate_process(process)
         return removed
+
+    @staticmethod
+    def _normalize_lifecycle_policy(value: object) -> str:
+        raw = str(value or "manual").strip().lower().replace("-", "_")
+        if raw in {"manual", "always_on", "24_7"}:
+            return "manual"
+        if raw in {"auto_close_when_empty", "auto_close", "auto"}:
+            return "auto_close_when_empty"
+        raise ValueError("lifecyclePolicy must be 'manual' or 'auto_close_when_empty'")
+
+    @staticmethod
+    def _coerce_int(value: object, field_name: str) -> int:
+        if not isinstance(value, (int, float, str)):
+            raise ValueError(f"{field_name} must be an integer")
+        try:
+            return int(value)
+        except (TypeError, ValueError) as ex:
+            raise ValueError(f"{field_name} must be an integer") from ex
+
+    def _apply_runtime_update_locked(self, record: SessionRecord, payload: Dict[str, object], now: float) -> None:
+        if "currentPlayers" in payload:
+            record.current_players = max(0, self._coerce_int(payload.get("currentPlayers"), "currentPlayers"))
+        if "maxPlayers" in payload:
+            record.max_players = max(1, self._coerce_int(payload.get("maxPlayers"), "maxPlayers"))
+        if "pingMs" in payload:
+            record.ping_ms = self._coerce_int(payload.get("pingMs"), "pingMs")
+
+        if record.current_players > 0:
+            record.empty_since_at = None
+        elif record.empty_since_at is None:
+            record.empty_since_at = now
 
     @staticmethod
     def _coerce_string_list(value: object) -> List[str]:
@@ -317,6 +384,9 @@ class SessionStore:
             "launchStatus": record.launch_status,
             "launchExitCode": record.launch_exit_code,
             "launchCommand": record.launch_command,
+            "lifecyclePolicy": record.lifecycle_policy,
+            "idleTimeoutSeconds": record.idle_timeout_seconds,
+            "emptySinceAt": epoch_to_utc_iso(record.empty_since_at) if record.empty_since_at else None,
         }
 
     def _record_to_admin_wire(self, record: SessionRecord, now: float) -> Dict[str, object]:
@@ -328,6 +398,7 @@ class SessionStore:
                 "lastHeartbeatAt": epoch_to_utc_iso(record.last_heartbeat_at),
                 "staleAgeSeconds": round(stale_age, 3),
                 "isStale": stale_age > self._ttl_seconds,
+                "emptyAgeSeconds": round(max(0.0, now - record.empty_since_at), 3) if record.empty_since_at else 0.0,
             }
         )
         return base
@@ -441,11 +512,19 @@ def make_handler(store: SessionStore, bearer_token: str):
                     self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
                     return
                 session_id = parts[1]
-                touched = store.heartbeat(session_id)
+                heartbeat_payload = self._read_json()
+                touched = store.heartbeat(session_id, heartbeat_payload)
                 if not touched:
                     self._json_response(HTTPStatus.NOT_FOUND, {"error": "session_not_found"})
                     return
-                self._json_response(HTTPStatus.OK, {"sessionId": session_id, "status": "heartbeat_updated"})
+                self._json_response(
+                    HTTPStatus.OK,
+                    {
+                        "sessionId": session_id,
+                        "status": "heartbeat_updated",
+                        "currentPlayers": touched.current_players,
+                    },
+                )
                 return
 
             self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -475,8 +554,15 @@ def make_handler(store: SessionStore, bearer_token: str):
     return RegistryHandler
 
 
-def build_server(host: str, port: int, token: str, ttl_seconds: int, cleanup_interval: int) -> Tuple[ThreadingHTTPServer, threading.Event, threading.Thread]:
-    store = SessionStore(ttl_seconds=ttl_seconds)
+def build_server(
+    host: str,
+    port: int,
+    token: str,
+    ttl_seconds: int,
+    cleanup_interval: int,
+    idle_shutdown_seconds: int = 900,
+) -> Tuple[ThreadingHTTPServer, threading.Event, threading.Thread]:
+    store = SessionStore(ttl_seconds=ttl_seconds, default_idle_shutdown_seconds=idle_shutdown_seconds)
     handler_cls = make_handler(store, token)
     httpd = ThreadingHTTPServer((host, port), handler_cls)
     stop_event, cleanup_thread = start_cleanup_loop(store, cleanup_interval)
@@ -490,6 +576,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--token", default=os.getenv("SESSION_REGISTRY_TOKEN", ""))
     parser.add_argument("--ttl-seconds", type=int, default=int(os.getenv("SESSION_REGISTRY_TTL_SECONDS", "120")))
     parser.add_argument("--cleanup-interval", type=int, default=int(os.getenv("SESSION_REGISTRY_CLEANUP_INTERVAL", "10")))
+    parser.add_argument("--idle-shutdown-seconds", type=int, default=int(os.getenv("SESSION_REGISTRY_IDLE_SHUTDOWN_SECONDS", "900")))
     return parser.parse_args()
 
 
@@ -501,6 +588,7 @@ def main() -> None:
         token=args.token,
         ttl_seconds=args.ttl_seconds,
         cleanup_interval=args.cleanup_interval,
+        idle_shutdown_seconds=args.idle_shutdown_seconds,
     )
 
     bind_host, bind_port = server.server_address

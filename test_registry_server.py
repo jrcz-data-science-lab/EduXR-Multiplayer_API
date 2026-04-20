@@ -99,6 +99,36 @@ class RegistryServerApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(deleted["status"], "deleted")
 
+    def test_heartbeat_can_update_current_players(self):
+        status, created = self._request(
+            "POST",
+            "/sessions",
+            data={
+                "serverName": "Player Count Session",
+                "connectAddress": "127.0.0.1",
+                "connectPort": 7780,
+                "currentPlayers": 0,
+            },
+        )
+        self.assertEqual(status, 201)
+        session_id = created["sessionId"]
+
+        hb_status, hb_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/heartbeat",
+            data={"currentPlayers": 3},
+        )
+        self.assertEqual(hb_status, 200)
+        self.assertEqual(hb_payload["currentPlayers"], 3)
+
+        _, admin_listing = self._request("GET", "/admin/sessions")
+        row = next((s for s in admin_listing["sessions"] if s["sessionId"] == session_id), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["currentPlayers"], 3)
+
+        delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
+        self.assertEqual(delete_status, 200)
+
     def test_admin_page_is_served(self):
         status, content_type, body = self._request_text("GET", "/admin", auth=False)
         self.assertEqual(status, 200)
@@ -216,6 +246,78 @@ class RegistryServerApiTests(unittest.TestCase):
 
             delete_status, _ = self._request("DELETE", f"/sessions/{created['sessionId']}")
             self.assertEqual(delete_status, 200)
+
+    def test_auto_close_when_empty_removes_launched_session(self):
+        short_lived_server, stop_event, cleanup_thread = build_server(
+            host="127.0.0.1",
+            port=0,
+            token=self.token,
+            ttl_seconds=60,
+            cleanup_interval=1,
+            idle_shutdown_seconds=1,
+        )
+        thread = threading.Thread(target=short_lived_server.serve_forever, daemon=True)
+        thread.start()
+
+        host, port = short_lived_server.server_address
+        base_url = f"http://{host}:{port}"
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            launcher_script = Path(temp_dir) / "launcher_sleep.py"
+            launcher_script.write_text(
+                "import time\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+
+            create_req = Request(
+                url=f"{base_url}/sessions",
+                data=json.dumps(
+                    {
+                        "serverName": "Auto Close Session",
+                        "connectAddress": "127.0.0.1",
+                        "connectPort": 9010,
+                        "currentPlayers": 0,
+                        "lifecyclePolicy": "auto_close_when_empty",
+                        "idleTimeoutSeconds": 1,
+                        "launch": {
+                            "scriptPath": sys.executable,
+                            "scriptArgs": [str(launcher_script)],
+                        },
+                    }
+                ).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+
+            with urlopen(create_req, timeout=3) as response:
+                created = json.loads(response.read().decode("utf-8"))
+
+            session_id = created["sessionId"]
+            self.assertEqual(created.get("launchStatus"), "running")
+
+            deadline = time.time() + 4.0
+            removed = False
+            while time.time() < deadline:
+                admin_req = Request(url=f"{base_url}/admin/sessions", headers=headers, method="GET")
+                with urlopen(admin_req, timeout=3) as response:
+                    listing = json.loads(response.read().decode("utf-8"))
+                if all(row.get("sessionId") != session_id for row in listing.get("sessions", [])):
+                    removed = True
+                    break
+                time.sleep(0.2)
+
+            self.assertTrue(removed, "auto-close policy should remove idle empty launched session")
+
+        short_lived_server.shutdown()
+        stop_event.set()
+        cleanup_thread.join(timeout=1.0)
+        short_lived_server.server_close()
 
 
 if __name__ == "__main__":
