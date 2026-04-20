@@ -140,7 +140,7 @@ class SessionStore:
                 self._refresh_process_state_locked(record, now)
             records = [
                 record for record in self._sessions.values()
-                if (now - record.last_heartbeat_at) <= self._ttl_seconds
+                if (now - record.last_heartbeat_at) <= self._ttl_seconds or record.launch_status == "running"
             ]
 
         return {"sessions": [self._record_to_wire(record) for record in records]}
@@ -201,7 +201,7 @@ class SessionStore:
                 self._refresh_process_state_locked(record, now)
             expired_ids: List[str] = []
             for session_id, record in self._sessions.items():
-                is_stale = (now - record.last_heartbeat_at) > self._ttl_seconds
+                is_stale = (now - record.last_heartbeat_at) > self._ttl_seconds and record.launch_status != "running"
                 is_idle_empty = (
                     record.launch_status == "running"
                     and record.lifecycle_policy == "auto_close_when_empty"
@@ -364,8 +364,6 @@ class SessionStore:
         if exit_code is None:
             record.launch_status = "running"
             record.launch_exit_code = None
-            # Process-backed sessions remain discoverable while server process lives.
-            record.last_heartbeat_at = now
         else:
             record.launch_status = "exited"
             record.launch_exit_code = int(exit_code)
@@ -611,7 +609,7 @@ def build_server(
 ) -> Tuple[ThreadingHTTPServer, threading.Event, threading.Thread]:
     store = SessionStore(ttl_seconds=ttl_seconds, default_idle_shutdown_seconds=idle_shutdown_seconds)
     handler_cls = make_handler(store, token)
-    httpd = ThreadingHTTPServer((host, port), handler_cls)
+    httpd = ThreadingHTTPServer((host, port), handler_cls)  # type: ignore[arg-type]
     stop_event, cleanup_thread = start_cleanup_loop(store, cleanup_interval)
     return httpd, stop_event, cleanup_thread
 

@@ -286,6 +286,40 @@ class RegistryServerApiTests(unittest.TestCase):
             delete_status, _ = self._request("DELETE", f"/sessions/{created['sessionId']}")
             self.assertEqual(delete_status, 200)
 
+    def test_stale_age_increases_for_running_launched_sessions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            launcher_script = Path(temp_dir) / "launcher_sleep.py"
+            launcher_script.write_text(
+                "import time\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+
+            status, created = self._request(
+                "POST",
+                "/sessions",
+                data={
+                    "serverName": "Stale Age Session",
+                    "connectAddress": "127.0.0.1",
+                    "connectPort": 9020,
+                    "launch": {
+                        "scriptPath": sys.executable,
+                        "scriptArgs": [str(launcher_script)],
+                    },
+                },
+            )
+            self.assertEqual(status, 201)
+
+            time.sleep(1.2)
+
+            _, admin_listing = self._request("GET", "/admin/sessions")
+            row = next((s for s in admin_listing["sessions"] if s["sessionId"] == created["sessionId"]), None)
+            self.assertIsNotNone(row)
+            self.assertGreater(row["staleAgeSeconds"], 0)
+
+            delete_status, _ = self._request("DELETE", f"/sessions/{created['sessionId']}")
+            self.assertEqual(delete_status, 200)
+
     def test_auto_close_when_empty_removes_launched_session(self):
         short_lived_server, stop_event, cleanup_thread = build_server(
             host="127.0.0.1",
