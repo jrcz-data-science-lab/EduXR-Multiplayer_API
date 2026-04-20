@@ -21,9 +21,7 @@ This matches the dedicated flow in `XrMpGameInstance` where:
 ## Run
 
 ```powershell
-Push-Location "C:\Users\ZeroR\Documents\Unreal Projects\OpenXrMp\SessionRegistryApi"
-python .\registry_server.py --host 0.0.0.0 --port 8080 --token change-me
-Pop-Location
+.\registry_server.py --host 0.0.0.0 --port 8080 --token change-me
 ```
 
 Environment variable equivalents:

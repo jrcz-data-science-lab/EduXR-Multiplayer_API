@@ -5,63 +5,268 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OpenXrMp Session Admin</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 16px; background: #f7f7f7; }
-    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-    label { display: inline-block; width: 160px; }
-    input { margin: 4px 0; padding: 6px; width: 260px; }
-    button { padding: 6px 10px; margin-right: 8px; }
-    table { width: 100%; border-collapse: collapse; background: #fff; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
-    th { background: #f1f1f1; }
-    .stale { color: #b00020; font-weight: 700; }
-    .ok { color: #0a7a2e; }
-    .muted { color: #666; }
+    :root {
+      --bg: #090d17;
+      --bg-elev: #101827;
+      --bg-elev-2: #0f1e31;
+      --border: #1c324a;
+      --text: #d8e9ff;
+      --muted: #87a3c8;
+      --accent: #46d4ff;
+      --accent-strong: #1be8ff;
+      --ok: #59f3c4;
+      --warn: #ff5f87;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(1300px 680px at 10% -5%, rgba(70, 212, 255, 0.2), transparent 60%),
+        radial-gradient(1100px 700px at 100% 0%, rgba(85, 143, 255, 0.18), transparent 55%),
+        var(--bg);
+      min-height: 100vh;
+    }
+
+    .app-shell {
+      width: min(1200px, calc(100% - 32px));
+      margin: 20px auto 28px;
+    }
+
+    .title {
+      margin: 0 0 14px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 23px;
+      color: #f3f9ff;
+      text-shadow: 0 0 22px rgba(70, 212, 255, 0.18);
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(16, 24, 39, 0.94), rgba(11, 21, 35, 0.96));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(84, 126, 170, 0.22);
+    }
+
+    h3 {
+      margin: 2px 0 12px;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      color: #cae7ff;
+      text-transform: uppercase;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 10px 12px;
+      margin-bottom: 8px;
+    }
+
+    .form-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-row label {
+      width: auto;
+      font-size: 12px;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    input {
+      margin: 0;
+      width: 100%;
+      border: 1px solid #23405f;
+      border-radius: 8px;
+      background: rgba(7, 13, 23, 0.95);
+      color: var(--text);
+      padding: 9px 10px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(70, 212, 255, 0.18);
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 10px 0 12px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: 1px solid #2d607f;
+      background: linear-gradient(180deg, #193350, #122a45);
+      color: #d8ebff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      letter-spacing: 0.02em;
+      transition: transform 0.1s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    .btn:hover {
+      border-color: var(--accent-strong);
+      box-shadow: 0 0 0 2px rgba(70, 212, 255, 0.16);
+    }
+
+    .btn:active { transform: translateY(1px); }
+
+    .btn.primary {
+      border-color: #2d99c8;
+      background: linear-gradient(180deg, #1c577d, #143f61);
+    }
+
+    .btn.danger {
+      border-color: #834258;
+      background: linear-gradient(180deg, #4f2434, #351a24);
+      color: #ffd7e2;
+    }
+
+    .btn.small { padding: 6px 9px; font-size: 12px; }
+
+    .status-text {
+      font-size: 13px;
+      padding: 2px 0;
+    }
+
+    .ok { color: var(--ok); }
+    .stale { color: var(--warn); font-weight: 700; }
+    .muted { color: var(--muted); }
+
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 24, 0.8);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 920px;
+    }
+
+    th, td {
+      border-bottom: 1px solid rgba(40, 67, 98, 0.7);
+      padding: 9px 10px;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: linear-gradient(180deg, #12253b, #101f34);
+      color: #aad2f5;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      font-size: 11px;
+    }
+
+    tbody tr:hover { background: rgba(70, 212, 255, 0.08); }
+
+    .status-pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      border: 1px solid transparent;
+    }
+
+    .status-pill.ok {
+      color: #89ffd9;
+      background: rgba(43, 180, 138, 0.16);
+      border-color: rgba(89, 243, 196, 0.45);
+    }
+
+    .status-pill.stale {
+      color: #ffc2d2;
+      background: rgba(169, 51, 88, 0.2);
+      border-color: rgba(255, 95, 135, 0.5);
+    }
   </style>
 </head>
 <body>
-  <h2>OpenXrMp Dedicated Session Admin</h2>
+  <div class="app-shell">
+    <h2 class="title">OpenXrMp Dedicated Session Admin</h2>
 
-  <div class="card">
-    <div><label>API Base URL</label><input id="baseUrl" /></div>
-    <div><label>Bearer Token</label><input id="token" type="password" /></div>
-    <button id="refreshBtn">Refresh</button>
-    <span id="status" class="muted"></span>
-  </div>
+    <div class="card">
+      <div class="form-grid">
+        <div class="form-row"><label for="baseUrl">API Base URL</label><input id="baseUrl" /></div>
+        <div class="form-row"><label for="token">Bearer Token</label><input id="token" type="password" /></div>
+      </div>
+      <div class="toolbar">
+        <button id="refreshBtn" class="btn">Refresh</button>
+        <span id="status" class="status-text muted"></span>
+      </div>
+    </div>
 
-  <div class="card">
-    <h3>Create Session + Launch Server</h3>
-    <div><label>Server Name</label><input id="serverName" value="Teacher Session" /></div>
-    <div><label>Owner Name</label><input id="ownerName" value="On-Prem Server" /></div>
-    <div><label>Connect Address</label><input id="connectAddress" value="127.0.0.1" /></div>
-    <div><label>Connect Port</label><input id="connectPort" value="7777" /></div>
-    <div><label>Map</label><input id="mapName" value="/Game/VRTemplate/VRTemplateMap" /></div>
-    <div><label>Max Players</label><input id="maxPlayers" value="16" /></div>
-    <hr />
-    <div><label>Launch Script Path</label><input id="launchScriptPath" placeholder="/home/ubuntu/OpenXrMp/start_server.sh" /></div>
-    <div><label>Script Interpreter</label><input id="launchInterpreter" value="/bin/bash" /></div>
-    <div><label>Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu/OpenXrMp" /></div>
-    <div><label>Script Args (JSON)</label><input id="launchArgs" value='["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]' /></div>
-    <button id="createBtn">Create</button>
-  </div>
+    <div class="card">
+      <h3>Create Session + Launch Server</h3>
+      <div class="form-grid">
+        <div class="form-row"><label for="serverName">Server Name</label><input id="serverName" value="Teacher Session" /></div>
+        <div class="form-row"><label for="ownerName">Owner Name</label><input id="ownerName" value="On-Prem Server" /></div>
+        <div class="form-row"><label for="connectAddress">Connect Address</label><input id="connectAddress" value="127.0.0.1" /></div>
+        <div class="form-row"><label for="connectPort">Connect Port</label><input id="connectPort" value="7777" /></div>
+        <div class="form-row"><label for="mapName">Map</label><input id="mapName" value="/Game/VRTemplate/VRTemplateMap" /></div>
+        <div class="form-row"><label for="maxPlayers">Max Players</label><input id="maxPlayers" value="16" /></div>
+      </div>
+      <hr />
+      <div class="form-grid">
+        <div class="form-row"><label for="launchScriptPath">Launch Script Path</label><input id="launchScriptPath" placeholder="/home/ubuntu/OpenXrMp/start_server.sh" /></div>
+        <div class="form-row"><label for="launchInterpreter">Script Interpreter</label><input id="launchInterpreter" value="/bin/bash" /></div>
+        <div class="form-row"><label for="launchCwd">Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu/OpenXrMp" /></div>
+        <div class="form-row"><label for="launchArgs">Script Args (JSON)</label><input id="launchArgs" value='["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]' /></div>
+      </div>
+      <div class="toolbar">
+        <button id="createBtn" class="btn primary">Create Session</button>
+      </div>
+    </div>
 
-  <div class="card">
-    <h3>Sessions</h3>
-    <table>
-      <thead>
-        <tr>
-          <th>Server</th>
-          <th>Connect</th>
-          <th>Players</th>
-          <th>Created</th>
-          <th>Last Heartbeat</th>
-          <th>Stale Age (s)</th>
-          <th>Launch</th>
-          <th>Status</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
+    <div class="card">
+      <h3>Sessions</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Server</th>
+              <th>Connect</th>
+              <th>Players</th>
+              <th>Created</th>
+              <th>Last Heartbeat</th>
+              <th>Stale Age (s)</th>
+              <th>Launch</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -98,12 +303,19 @@
 
     function setStatus(text, good = true) {
       statusEl.textContent = text;
-      statusEl.className = good ? "ok" : "stale";
+      statusEl.className = `status-text ${good ? "ok" : "stale"}`;
     }
 
     function renderRows(sessions) {
       const tbody = byId("rows");
       tbody.innerHTML = "";
+      if (!sessions.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="9" class="muted">No active sessions yet.</td>`;
+        tbody.appendChild(tr);
+        return;
+      }
+
       for (const row of sessions) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -114,8 +326,8 @@
           <td>${row.lastHeartbeatAt || ""}</td>
           <td>${row.staleAgeSeconds ?? ""}</td>
           <td>${row.launchStatus || ""}${row.launchPid ? ` (pid ${row.launchPid})` : ""}</td>
-          <td class="${row.isStale ? "stale" : "ok"}">${row.isStale ? "STALE" : "OK"}</td>
-          <td><button data-delete="${row.sessionId}">Delete</button></td>
+          <td><span class="status-pill ${row.isStale ? "stale" : "ok"}">${row.isStale ? "STALE" : "OK"}</span></td>
+          <td><button class="btn danger small" data-delete="${row.sessionId}">Delete</button></td>
         `;
         tbody.appendChild(tr);
       }
