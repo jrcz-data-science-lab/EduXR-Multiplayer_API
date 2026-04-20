@@ -168,6 +168,19 @@ class SessionStore:
             self._apply_runtime_update_locked(record, payload or {}, now)
             return record
 
+    def update_players(self, session_id: str, payload: Dict[str, object]) -> Optional[SessionRecord]:
+        if "currentPlayers" not in payload:
+            raise ValueError("currentPlayers is required")
+
+        with self._lock:
+            record = self._sessions.get(session_id)
+            if not record:
+                return None
+            now = time.time()
+            record.last_heartbeat_at = now
+            self._apply_runtime_update_locked(record, payload, now)
+            return record
+
     def delete(self, session_id: str) -> bool:
         process: Optional[subprocess.Popen] = None
         with self._lock:
@@ -224,12 +237,18 @@ class SessionStore:
 
     @staticmethod
     def _coerce_int(value: object, field_name: str) -> int:
-        if not isinstance(value, (int, float, str)):
-            raise ValueError(f"{field_name} must be an integer")
-        try:
+        if isinstance(value, bool):
             return int(value)
-        except (TypeError, ValueError) as ex:
-            raise ValueError(f"{field_name} must be an integer") from ex
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError as ex:
+                raise ValueError(f"{field_name} must be an integer") from ex
+        raise ValueError(f"{field_name} must be an integer")
 
     def _apply_runtime_update_locked(self, record: SessionRecord, payload: Dict[str, object], now: float) -> None:
         if "currentPlayers" in payload:
@@ -502,6 +521,34 @@ def make_handler(store: SessionStore, bearer_token: str):
                     self._json_response(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
                     return
                 self._json_response(HTTPStatus.CREATED, store._record_to_wire(created))
+                return
+
+            if path.startswith("/sessions/") and path.endswith("/players"):
+                if not self._require_auth():
+                    return
+                parts = [p for p in path.split("/") if p]
+                if len(parts) != 3:
+                    self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+                    return
+                session_id = parts[1]
+                players_payload = self._read_json()
+                try:
+                    touched = store.update_players(session_id, players_payload)
+                except ValueError as ex:
+                    self._json_response(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
+                    return
+                if not touched:
+                    self._json_response(HTTPStatus.NOT_FOUND, {"error": "session_not_found"})
+                    return
+                self._json_response(
+                    HTTPStatus.OK,
+                    {
+                        "sessionId": session_id,
+                        "status": "players_updated",
+                        "currentPlayers": touched.current_players,
+                        "maxPlayers": touched.max_players,
+                    },
+                )
                 return
 
             if path.startswith("/sessions/") and path.endswith("/heartbeat"):

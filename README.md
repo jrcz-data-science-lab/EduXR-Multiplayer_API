@@ -7,6 +7,7 @@ Small on-prem registry API for dedicated server discovery.
 - `POST /sessions` - register/create a session row (optionally launch dedicated server process).
 - `GET /sessions` - return discoverable sessions for Unreal clients.
 - `POST /sessions/{sessionId}/heartbeat` - keep session alive.
+- `POST /sessions/{sessionId}/players` - update `currentPlayers` (and optional `maxPlayers`) explicitly.
 - `DELETE /sessions/{sessionId}` - remove session row.
 - `GET /health` - health endpoint.
 - `GET /admin` - simple HTML admin panel.
@@ -15,6 +16,7 @@ Small on-prem registry API for dedicated server discovery.
 Lifecycle behavior:
 
 - `POST /sessions/{sessionId}/heartbeat` updates `lastHeartbeatAt`.
+- `POST /sessions/{sessionId}/players` also refreshes heartbeat and updates player counts.
 - Process-launched sessions refresh heartbeat automatically while the process is still running.
 - `DELETE /sessions/{sessionId}` removes the row and terminates the launched process (if present).
 - Optional create controls:
@@ -111,6 +113,17 @@ Supported placeholders in `launch.scriptArgs`, `launch.scriptPath`, `launch.cwd`
 - `{buildUniqueId}`
 - `{mode}`
 
+Update player count explicitly:
+
+```json
+{
+  "currentPlayers": 5,
+  "maxPlayers": 16
+}
+```
+
+`POST /sessions/{sessionId}/players`
+
 ## One-click launch setup (recommended)
 
 This repo includes:
@@ -135,6 +148,7 @@ If you create sessions from `/admin`, use these values:
 - `Launch Script Path` -> `/home/ubuntu/SessionRegistryApi/start_server.sh`
 - `Script Interpreter` -> `/bin/bash`
 - `Launch Working Dir` -> `/home/ubuntu/SessionRegistryApi`
+- `Server File Path (Linux)` -> `/home/ubuntu/OpenXrMpServer/LinuxServer/OpenXrMpServer.sh` (optional)
 - `Script Args (JSON)` -> `["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]`
 
 Then create a session row; registry will launch the script and return `launchPid`/`launchStatus` in API responses.

@@ -129,6 +129,45 @@ class RegistryServerApiTests(unittest.TestCase):
         delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
         self.assertEqual(delete_status, 200)
 
+    def test_players_endpoint_updates_current_players(self):
+        status, created = self._request(
+            "POST",
+            "/sessions",
+            data={
+                "serverName": "Players Endpoint Session",
+                "connectAddress": "127.0.0.1",
+                "connectPort": 7781,
+                "currentPlayers": 0,
+                "maxPlayers": 8,
+            },
+        )
+        self.assertEqual(status, 201)
+        session_id = created["sessionId"]
+
+        update_status, update_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/players",
+            data={"currentPlayers": 4, "maxPlayers": 12},
+        )
+        self.assertEqual(update_status, 200)
+        self.assertEqual(update_payload["status"], "players_updated")
+        self.assertEqual(update_payload["currentPlayers"], 4)
+        self.assertEqual(update_payload["maxPlayers"], 12)
+
+        _, admin_listing = self._request("GET", "/admin/sessions")
+        row = next((s for s in admin_listing["sessions"] if s["sessionId"] == session_id), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["currentPlayers"], 4)
+        self.assertEqual(row["maxPlayers"], 12)
+
+        with self.assertRaises(HTTPError) as bad_request:
+            self._request("POST", f"/sessions/{session_id}/players", data={})
+        self.assertEqual(bad_request.exception.code, 400)
+        bad_request.exception.close()
+
+        delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
+        self.assertEqual(delete_status, 200)
+
     def test_admin_page_is_served(self):
         status, content_type, body = self._request_text("GET", "/admin", auth=False)
         self.assertEqual(status, 200)
