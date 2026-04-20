@@ -1,7 +1,7 @@
 ﻿{
-  "serverName": "Teacher Session",
+  "serverName": "Test server",
   "ownerName": "On-Prem Server",
-  "connectAddress": "10.0.0.25",
+  "connectAddress": "145.19.54.111",
   "connectPort": 7777,
   "maxPlayers": 16,
   "currentPlayers": 0,
@@ -11,7 +11,7 @@
   "launch": {
     "scriptPath": "/home/ubuntu/SessionRegistryApi/start_server.sh",
     "scriptInterpreter": "/bin/bash",
-    "cwd": "/home/ubuntu/SessionRegistryApi",
+    "cwd": "/home/ubuntu-2/Documents/EduXrMultiplayer_API/",
     "scriptArgs": [
       "{connectPort}",
       "{map}",
@@ -20,9 +20,9 @@
       "{sessionId}"
     ],
     "env": {
-      "OPENXR_SERVER_SCRIPT": "/home/ubuntu/OpenXrMpServer/LinuxServer/OpenXrMpServer.sh",
-      "OPENXR_SERVER_ROOT": "/home/ubuntu/OpenXrMpServer/LinuxServer",
-      "OPENXR_LOG_DIR": "/home/ubuntu/OpenXrMpServer/logs"
+      "OPENXR_SERVER_SCRIPT": "/home/ubuntu-2/Documents/OpenXrMpServer/OpenXrMpServer.sh",
+      "OPENXR_SERVER_ROOT": "/home/ubuntu-2/Documents/OpenXrMpServer",
+      "OPENXR_LOG_DIR": "/home/ubuntu-2/Documents/OpenXrMpServer/logs"
     }
   }
 }
