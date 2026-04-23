@@ -88,6 +88,7 @@ Create + launch server script in one request:
     "scriptPath": "/home/ubuntu/OpenXrMp/start_server.sh",
     "scriptInterpreter": "/bin/bash",
     "cwd": "/home/ubuntu/OpenXrMp",
+    "multiHomeIp": "10.0.0.25",
     "scriptArgs": [
       "{connectPort}",
       "{map}",
@@ -98,6 +99,8 @@ Create + launch server script in one request:
   }
 }
 ```
+
+`launch.multiHomeIp` (or top-level `multiHomeIp`) is optional. When present, the registry validates it as an IP address and forwards it to the launcher as `MULTIHOME_IP`, which `start_server.sh` converts into Unreal `-MULTIHOME=<ip>`.
 
 Supported placeholders in `launch.scriptArgs`, `launch.scriptPath`, `launch.cwd`, and `launch.env` values:
 
@@ -146,6 +149,7 @@ If you create sessions from `/admin`, use these values:
 - `Script Interpreter` -> `/bin/bash`
 - `Launch Working Dir` -> `/home/ubuntu/SessionRegistryApi`
 - `Server File Path (Linux)` -> `/home/ubuntu/OpenXrMpServer/LinuxServer/OpenXrMpServer.sh` (optional)
+- `MultiHome IP (Server NIC bind)` -> your server LAN IP (for example `145.19.54.111`)
 - `Script Args (JSON)` -> `["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]`
 - `Lifecycle` -> `Run 24/7` for manual shutdown, or uncheck it to auto-close when empty
 - `Auto-close idle timeout (seconds)` -> how long the server can stay empty before shutdown

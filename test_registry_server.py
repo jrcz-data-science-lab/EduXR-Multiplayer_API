@@ -286,6 +286,65 @@ class RegistryServerApiTests(unittest.TestCase):
             delete_status, _ = self._request("DELETE", f"/sessions/{created['sessionId']}")
             self.assertEqual(delete_status, 200)
 
+    def test_create_launch_passes_multihome_ip_to_env(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            marker_path = Path(temp_dir) / "multihome_marker.txt"
+            launcher_script = Path(temp_dir) / "launcher_multihome.py"
+            launcher_script.write_text(
+                "import os\n"
+                "import pathlib\n"
+                "import sys\n"
+                "import time\n"
+                "pathlib.Path(sys.argv[1]).write_text(os.getenv('MULTIHOME_IP', ''), encoding='utf-8')\n"
+                "time.sleep(10)\n",
+                encoding="utf-8",
+            )
+
+            status, created = self._request(
+                "POST",
+                "/sessions",
+                data={
+                    "serverName": "Launch MultiHome Session",
+                    "connectAddress": "127.0.0.1",
+                    "connectPort": 9002,
+                    "launch": {
+                        "scriptPath": sys.executable,
+                        "scriptArgs": [str(launcher_script), str(marker_path)],
+                        "multiHomeIp": "145.19.54.111",
+                    },
+                },
+            )
+            self.assertEqual(status, 201)
+            self.assertEqual(created.get("launchStatus"), "running")
+
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not marker_path.exists():
+                time.sleep(0.05)
+
+            self.assertTrue(marker_path.exists())
+            self.assertEqual(marker_path.read_text(encoding="utf-8"), "145.19.54.111")
+
+            delete_status, _ = self._request("DELETE", f"/sessions/{created['sessionId']}")
+            self.assertEqual(delete_status, 200)
+
+    def test_create_launch_rejects_invalid_multihome_ip(self):
+        with self.assertRaises(HTTPError) as bad_request:
+            self._request(
+                "POST",
+                "/sessions",
+                data={
+                    "connectAddress": "127.0.0.1",
+                    "connectPort": 9003,
+                    "launch": {
+                        "scriptPath": sys.executable,
+                        "scriptArgs": ["-c", "import time; time.sleep(1)"],
+                        "multiHomeIp": "not-an-ip",
+                    },
+                },
+            )
+        self.assertEqual(bad_request.exception.code, 400)
+        bad_request.exception.close()
+
     def test_stale_age_increases_for_running_launched_sessions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             launcher_script = Path(temp_dir) / "launcher_sleep.py"

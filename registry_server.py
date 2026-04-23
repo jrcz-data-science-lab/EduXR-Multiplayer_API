@@ -1,4 +1,5 @@
 ﻿import argparse
+import ipaddress
 import json
 import os
 import subprocess
@@ -308,6 +309,22 @@ class SessionStore:
         launch_env: Dict[str, str] = {}
         if isinstance(env_value, dict):
             launch_env = {str(k): str(v) for k, v in env_value.items()}
+
+        multihome_ip_raw = (
+            launch_payload.get("multiHomeIp")
+            or launch_payload.get("multihomeIp")
+            or payload.get("multiHomeIp")
+            or payload.get("multihomeIp")
+            or launch_env.get("MULTIHOME_IP")
+            or ""
+        )
+        multihome_ip = str(multihome_ip_raw).strip()
+        if multihome_ip:
+            try:
+                ipaddress.ip_address(multihome_ip)
+            except ValueError as ex:
+                raise ValueError("multiHomeIp must be a valid IPv4 or IPv6 address") from ex
+            launch_env["MULTIHOME_IP"] = multihome_ip
 
         return {
             "scriptPath": script_path,
