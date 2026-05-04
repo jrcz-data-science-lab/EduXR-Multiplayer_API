@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+# Small helper client: create a session, keep it alive, then clean it up on exit.
 def request_json(base_url: str, path: str, method: str, token: str, payload: Optional[Dict[str, object]] = None, timeout: int = 5) -> Dict[str, object]:
     body = None
     headers = {"Accept": "application/json"}
@@ -25,6 +26,7 @@ def request_json(base_url: str, path: str, method: str, token: str, payload: Opt
 
 
 def normalize_base_url(raw: str) -> str:
+    # Normalize once so callers can pass a plain host URL without trailing slashes.
     normalized = raw.strip().rstrip("/")
     if not normalized:
         raise ValueError("base URL cannot be empty")
@@ -32,6 +34,7 @@ def normalize_base_url(raw: str) -> str:
 
 
 def parse_args() -> argparse.Namespace:
+    # CLI options mirror the fields used by the registry and admin UI.
     parser = argparse.ArgumentParser(description="Heartbeat sidecar for OpenXrMp session registry")
     parser.add_argument("--base-url", required=True, help="Registry base URL, e.g. http://10.0.0.25:8080")
     parser.add_argument("--token", default="", help="Bearer token used by registry")
@@ -51,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Register the session, heartbeat until stopped, then delete the session best-effort.
     args = parse_args()
     base_url = normalize_base_url(args.base_url)
     stop_event = threading.Event()
@@ -64,6 +68,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, _handle_stop)
 
     create_payload = {
+        # This is the initial session snapshot sent to the registry.
         "serverName": args.server_name,
         "ownerName": args.owner_name,
         "connectAddress": args.connect_address,
@@ -95,6 +100,7 @@ def main() -> None:
 
         while not stop_event.wait(max(0.5, args.heartbeat_interval)):
             try:
+                # Heartbeat keeps the registry row fresh and can also carry runtime updates.
                 request_json(
                     base_url=base_url,
                     path=f"/sessions/{session_id}/heartbeat",
@@ -113,6 +119,7 @@ def main() -> None:
     finally:
         if session_id:
             try:
+                # Always try to clean up the session row when the helper exits.
                 request_json(
                     base_url=base_url,
                     path=f"/sessions/{session_id}",

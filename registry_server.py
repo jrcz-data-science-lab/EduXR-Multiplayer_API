@@ -15,6 +15,8 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 
+# Shared registry state lives in memory and is guarded by a single lock.
+# That keeps session updates and cleanup simple and predictable.
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -25,6 +27,7 @@ def epoch_to_utc_iso(epoch_seconds: float) -> str:
 
 @dataclass
 class SessionRecord:
+    # Wire-level session data plus runtime state for launches, heartbeat, and idle shutdown.
     session_id: str
     server_name: str
     owner_name: str
@@ -48,6 +51,7 @@ class SessionRecord:
 
 class SessionStore:
     def __init__(self, ttl_seconds: int, default_idle_shutdown_seconds: int = 900) -> None:
+        # TTL controls discoverability; idle shutdown controls empty-server auto close.
         self._ttl_seconds = max(1, ttl_seconds)
         self._default_idle_shutdown_seconds = max(1, default_idle_shutdown_seconds)
         self._lock = threading.Lock()
@@ -59,6 +63,7 @@ class SessionStore:
         return self._ttl_seconds
 
     def create(self, payload: Dict[str, object]) -> SessionRecord:
+        # Accepts a flexible request body so Unreal, the admin UI, and helpers can all create sessions.
         server_name = str(payload.get("serverName") or "Dedicated Server")
         owner_name = str(payload.get("ownerName") or "On-Prem Server")
         map_name = str(payload.get("map") or "/Game/VRTemplate/VRTemplateMap")
@@ -107,6 +112,7 @@ class SessionStore:
         launch_spec = self._build_launch_spec(payload)
         launched_process: Optional[subprocess.Popen] = None
         if launch_spec:
+            # Fill template placeholders before we spawn the server process.
             launch_context = {
                 "sessionId": session_id,
                 "serverName": server_name,
@@ -139,6 +145,7 @@ class SessionStore:
         with self._lock:
             for record in self._sessions.values():
                 self._refresh_process_state_locked(record, now)
+            # Public listing keeps active sessions visible while their process is alive.
             records = [
                 record for record in self._sessions.values()
                 if (now - record.last_heartbeat_at) <= self._ttl_seconds or record.launch_status == "running"
@@ -164,12 +171,14 @@ class SessionStore:
             record = self._sessions.get(session_id)
             if not record:
                 return None
+            # Heartbeat is the lightweight keep-alive path; it can also carry runtime stats.
             now = time.time()
             record.last_heartbeat_at = now
             self._apply_runtime_update_locked(record, payload or {}, now)
             return record
 
     def update_players(self, session_id: str, payload: Dict[str, object]) -> Optional[SessionRecord]:
+        # Dedicated player-count endpoint used by the server when joins/leaves happen.
         if "currentPlayers" not in payload:
             raise ValueError("currentPlayers is required")
 
@@ -183,6 +192,7 @@ class SessionStore:
             return record
 
     def delete(self, session_id: str) -> bool:
+        # Remove the row first, then stop the launched process outside the lock.
         process: Optional[subprocess.Popen] = None
         with self._lock:
             existed = self._sessions.pop(session_id, None) is not None
@@ -202,6 +212,7 @@ class SessionStore:
                 self._refresh_process_state_locked(record, now)
             expired_ids: List[str] = []
             for session_id, record in self._sessions.items():
+                # Stale means no recent heartbeat; idle-empty means auto-close policy triggered.
                 is_stale = (now - record.last_heartbeat_at) > self._ttl_seconds and record.launch_status != "running"
                 is_idle_empty = (
                     record.launch_status == "running"
@@ -229,6 +240,7 @@ class SessionStore:
 
     @staticmethod
     def _normalize_lifecycle_policy(value: object) -> str:
+        # Support a few friendly aliases, but store one canonical policy string.
         raw = str(value or "manual").strip().lower().replace("-", "_")
         if raw in {"manual", "always_on", "24_7"}:
             return "manual"
@@ -252,6 +264,7 @@ class SessionStore:
         raise ValueError(f"{field_name} must be an integer")
 
     def _apply_runtime_update_locked(self, record: SessionRecord, payload: Dict[str, object], now: float) -> None:
+        # Runtime fields are intentionally small: player count, max players, and ping.
         if "currentPlayers" in payload:
             record.current_players = max(0, self._coerce_int(payload.get("currentPlayers"), "currentPlayers"))
         if "maxPlayers" in payload:
@@ -284,6 +297,7 @@ class SessionStore:
         return []
 
     def _build_launch_spec(self, payload: Dict[str, object]) -> Optional[Dict[str, object]]:
+        # Launch settings can come from the nested launch object or from top-level form fields.
         launch_payload = payload.get("launch") if isinstance(payload.get("launch"), dict) else {}
 
         script_path = str(
@@ -320,6 +334,7 @@ class SessionStore:
         )
         multihome_ip = str(multihome_ip_raw).strip()
         if multihome_ip:
+            # Validate once here so the launcher only receives a good bind address.
             try:
                 ipaddress.ip_address(multihome_ip)
             except ValueError as ex:
@@ -343,6 +358,7 @@ class SessionStore:
         return value.format_map(_SafeDict(context))
 
     def _launch_process(self, launch_spec: Dict[str, object], context: Dict[str, object]) -> Tuple[subprocess.Popen, str]:
+        # Template expansion lets the admin UI and API reuse the same launch script.
         script_path = self._expand_template(str(launch_spec.get("scriptPath") or ""), context)
         if not script_path:
             raise ValueError("launch scriptPath is required")
@@ -370,6 +386,7 @@ class SessionStore:
         return process, " ".join(command)
 
     def _refresh_process_state_locked(self, record: SessionRecord, now: float) -> None:
+        # If the server process is still alive, keep its status current for the admin UI.
         if not record.launch_pid:
             return
 
@@ -388,6 +405,7 @@ class SessionStore:
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen) -> None:
+        # Terminate politely first, then force kill if needed.
         if process.poll() is not None:
             return
 
@@ -403,6 +421,7 @@ class SessionStore:
 
     @staticmethod
     def _record_to_wire(record: SessionRecord) -> Dict[str, object]:
+        # Wire payload stays compact for game clients and join lists.
         return {
             "sessionId": record.session_id,
             "serverName": record.server_name,
@@ -424,6 +443,7 @@ class SessionStore:
         }
 
     def _record_to_admin_wire(self, record: SessionRecord, now: float) -> Dict[str, object]:
+        # Admin payload adds timestamps and age values for operators.
         stale_age = max(0.0, now - record.last_heartbeat_at)
         base = self._record_to_wire(record)
         base.update(
@@ -439,6 +459,7 @@ class SessionStore:
 
 
 def start_cleanup_loop(store: SessionStore, interval_seconds: int) -> Tuple[threading.Event, threading.Thread]:
+    # Background cleanup keeps the registry tidy without blocking requests.
     stop_event = threading.Event()
 
     def _worker() -> None:
@@ -451,6 +472,7 @@ def start_cleanup_loop(store: SessionStore, interval_seconds: int) -> Tuple[thre
 
 
 def make_handler(store: SessionStore, bearer_token: str):
+    # One HTTP handler serves API, admin UI, and cleanup-friendly JSON responses.
     admin_index_path = Path(__file__).resolve().parent / "admin" / "index.html"
 
     class RegistryHandler(BaseHTTPRequestHandler):
@@ -473,6 +495,7 @@ def make_handler(store: SessionStore, bearer_token: str):
             self.wfile.write(encoded)
 
         def _read_json(self) -> Dict[str, object]:
+            # Be forgiving: missing or malformed JSON becomes an empty object.
             raw_len = self.headers.get("Content-Length", "0")
             length = int(raw_len) if raw_len.isdigit() else 0
             raw = self.rfile.read(length) if length > 0 else b"{}"
@@ -485,6 +508,7 @@ def make_handler(store: SessionStore, bearer_token: str):
                 return {}
 
         def _is_authorized(self) -> bool:
+            # If no token is configured, everything is open.
             if not bearer_token:
                 return True
             auth_header = self.headers.get("Authorization", "")
@@ -498,6 +522,7 @@ def make_handler(store: SessionStore, bearer_token: str):
             return False
 
         def do_GET(self) -> None:  # noqa: N802
+            # GET routes serve health, admin UI, and public/admin session lists.
             path = urlparse(self.path).path
             if path == "/health":
                 self._json_response(HTTPStatus.OK, {"status": "ok"})
@@ -525,6 +550,7 @@ def make_handler(store: SessionStore, bearer_token: str):
             self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
         def do_POST(self) -> None:  # noqa: N802
+            # POST handles create, heartbeat, and explicit player-count updates.
             path = urlparse(self.path).path
             if path == "/sessions":
                 if not self._require_auth():
@@ -592,6 +618,7 @@ def make_handler(store: SessionStore, bearer_token: str):
             self._json_response(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
         def do_DELETE(self) -> None:  # noqa: N802
+            # DELETE removes the session and stops any launched process.
             path = urlparse(self.path).path
             if path.startswith("/sessions/"):
                 if not self._require_auth():
@@ -624,6 +651,7 @@ def build_server(
     cleanup_interval: int,
     idle_shutdown_seconds: int = 900,
 ) -> Tuple[ThreadingHTTPServer, threading.Event, threading.Thread]:
+    # Build the HTTP server plus the background cleanup worker.
     store = SessionStore(ttl_seconds=ttl_seconds, default_idle_shutdown_seconds=idle_shutdown_seconds)
     handler_cls = make_handler(store, token)
     httpd = ThreadingHTTPServer((host, port), handler_cls)  # type: ignore[arg-type]
@@ -632,6 +660,7 @@ def build_server(
 
 
 def parse_args() -> argparse.Namespace:
+    # Command-line flags mirror the environment variables so deployment stays flexible.
     parser = argparse.ArgumentParser(description="OpenXrMp dedicated session registry")
     parser.add_argument("--host", default=os.getenv("SESSION_REGISTRY_HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.getenv("SESSION_REGISTRY_PORT", "8080")))
@@ -643,6 +672,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Start the registry and keep it running until interrupted.
     args = parse_args()
     server, stop_event, cleanup_thread = build_server(
         host=args.host,
@@ -662,6 +692,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # Shut down cleanup and HTTP server cleanly.
         stop_event.set()
         cleanup_thread.join(timeout=1.0)
         server.server_close()

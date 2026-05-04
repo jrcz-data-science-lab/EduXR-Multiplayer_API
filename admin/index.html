@@ -237,6 +237,7 @@
   <div class="app-shell">
     <h2 class="title">OpenXrMp Dedicated Session Admin</h2>
 
+    <!-- API settings first so the operator can point the UI at any registry. -->
     <div class="card">
       <div class="form-grid">
         <div class="form-row"><label for="baseUrl">API Base URL</label><input id="baseUrl" /></div>
@@ -248,23 +249,24 @@
       </div>
     </div>
 
+    <!-- Session creation combines launch, lifecycle, and runtime settings. -->
     <div class="card">
       <h3>Create Session + Launch Server</h3>
       <div class="form-grid">
         <div class="form-row"><label for="serverName">Server Name</label><input id="serverName" value="Teacher Session" /></div>
         <div class="form-row"><label for="ownerName">Owner Name</label><input id="ownerName" value="On-Prem Server" /></div>
-        <div class="form-row"><label for="connectAddress">Connect Address</label><input id="connectAddress" value="145.19.54.111" /></div>
-        <div class="form-row"><label for="multiHomeIp">MultiHome IP (Server NIC bind)</label><input id="multiHomeIp" placeholder="145.19.54.111" value="145.19.54.111" /></div>
+        <div class="form-row"><label for="connectAddress">Connect Address</label><input id="connectAddress" value="127.0.0.1" /></div>
+        <div class="form-row"><label for="multiHomeIp">MultiHome IP (Server NIC bind)</label><input id="multiHomeIp" placeholder="<server-ip>" /></div>
         <div class="form-row"><label for="connectPort">Connect Port</label><input id="connectPort" value="7777" /></div>
         <div class="form-row"><label for="mapName">Map</label><input id="mapName" value="/Game/VRTemplate/VRTemplateMap" /></div>
         <div class="form-row"><label for="maxPlayers">Max Players</label><input id="maxPlayers" value="16" /></div>
       </div>
       <hr />
       <div class="form-grid">
-        <div class="form-row"><label for="launchScriptPath">Launch Script Path</label><input id="launchScriptPath" placeholder="/home/ubuntu-2/Documents/EduXrMultiplayer_API/start_server.sh" value="/home/ubuntu-2/Documents/EduXrMultiplayer_API/start_server.sh" /></div>
+        <div class="form-row"><label for="launchScriptPath">Launch Script Path</label><input id="launchScriptPath" placeholder="/path/to/start_server.sh" /></div>
         <div class="form-row"><label for="launchInterpreter">Script Interpreter</label><input id="launchInterpreter" value="/bin/bash" /></div>
-        <div class="form-row"><label for="launchCwd">Launch Working Dir</label><input id="launchCwd" placeholder="/home/ubuntu-2/Documents/EduXrMultiplayer_API/" value="/home/ubuntu-2/Documents/EduXrMultiplayer_API/" /></div>
-        <div class="form-row"><label for="serverScriptPath">Server File Path (Linux)</label><input id="serverScriptPath" placeholder="/home/ubuntu-2/Documents/OpenXrMpServer/OpenXrMpServer.sh" value="/home/ubuntu-2/Documents/OpenXrMpServer/OpenXrMpServer.sh" /></div>
+        <div class="form-row"><label for="launchCwd">Launch Working Dir</label><input id="launchCwd" placeholder="/path/to/repo-root" /></div>
+        <div class="form-row"><label for="serverScriptPath">Server File Path (Linux)</label><input id="serverScriptPath" placeholder="/path/to/LinuxServer/OpenXrMpServer.sh" /></div>
         <div class="form-row"><label for="launchArgs">Script Args (JSON)</label><input id="launchArgs" value='["{connectPort}","{map}","{maxPlayers}","{serverName}","{sessionId}"]' /></div>
         <div class="form-row toggle-row">
           <label for="runNonstop">Server Lifecycle</label>
@@ -307,6 +309,7 @@
   </div>
 
   <script>
+    // Small utility helpers keep the request code short and easy to read.
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
 
@@ -325,6 +328,7 @@
     }
 
     async function requestJson(path, options = {}) {
+      // Every request automatically carries the base URL and bearer token.
       const url = `${getBaseUrl()}${path}`;
       const opts = { ...options, headers: { ...(options.headers || {}), ...getHeaders() } };
       const response = await fetch(url, opts);
@@ -344,10 +348,12 @@
     }
 
     function syncLifecycleInputs() {
+      // Manual mode means the idle timeout is not used.
       byId("idleTimeoutSeconds").disabled = byId("runNonstop").checked;
     }
 
     function renderRows(sessions) {
+      // Render the current registry state into a compact operator table.
       const tbody = byId("rows");
       tbody.innerHTML = "";
       if (!sessions.length) {
@@ -386,6 +392,7 @@
     }
 
     async function refresh() {
+      // Refresh is the normal read-only admin list flow.
       try {
         const payload = await requestJson("/admin/sessions", { method: "GET" });
         renderRows(payload.sessions || []);
@@ -396,6 +403,7 @@
     }
 
     async function createSession() {
+      // Build the exact payload expected by the registry create endpoint.
       let parsedArgs = [];
       const idleTimeoutSeconds = Math.max(1, Number(byId("idleTimeoutSeconds").value || "900"));
       const rawArgs = byId("launchArgs").value.trim();
@@ -416,6 +424,7 @@
       const multiHomeIp = byId("multiHomeIp").value.trim() || byId("connectAddress").value.trim();
       const launchEnv = {};
       if (serverScriptPath) {
+        // The launcher reads the Linux server path from this env var.
         launchEnv.OPENXR_SERVER_SCRIPT = serverScriptPath;
       }
 
@@ -464,6 +473,7 @@
     }
 
     byId("baseUrl").value = window.location.origin;
+    // Wire up the one form toggle that changes another field.
     byId("refreshBtn").addEventListener("click", refresh);
     byId("createBtn").addEventListener("click", createSession);
     byId("runNonstop").addEventListener("change", syncLifecycleInputs);
