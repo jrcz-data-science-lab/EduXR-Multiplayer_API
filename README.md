@@ -69,6 +69,7 @@ The admin form lets you configure:
 - lifecycle policy
 - idle timeout
 The form sends its launch settings directly; there is no separate payload template file.
+
 ### Admin launch fields
 If you use the admin panel to launch a Linux dedicated server, set:
 - `Launch Script Path` - path to `start_server.sh`
@@ -82,10 +83,9 @@ If `MultiHome IP` is provided, the launcher can forward it as `MULTIHOME_IP` so 
 ## Unreal setup
 In your Unreal project, use the dedicated-server flow from `XrMpGameInstance`.
 Set the registry values used by your game instance:
-- `DedicatedApiBaseUrl` -> `http://<registry-ip>:8080`
-- `DedicatedApiListRoute` -> `/sessions`
-- `DedicatedApiCreateRoute` -> `/sessions`
-- `DedicatedApiToken` -> your registry token
+- `SessionRegistryBaseUrl` -> `http://<registry-ip>:8080`
+- `SessionRegistryToken` -> your registry token
+- `SessionId` -> provided at server launch (for heartbeat and player updates)
 Typical flow:
 1. Host creates a session with `POST /sessions`.
 2. Clients query `GET /sessions`.
