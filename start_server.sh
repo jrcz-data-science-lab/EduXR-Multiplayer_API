@@ -50,5 +50,5 @@ echo "[start_server] Script: $SERVER_SCRIPT"
 echo "[start_server] Log: $LOG_FILE"
 
 # Use exec so the registry tracks the real Unreal server process PID.
-exec "$SERVER_SCRIPT" "$MAP_NAME" "-port=$PORT" "-log" "-unattended" "-NoCrashDialog" "${EXTRA_ARGS[@]}" >>"$LOG_FILE" 2>&1
+exec "$SERVER_SCRIPT" "$MAP_NAME" "-port=$PORT" "-SESSION_ID=$SESSION_ID" "-log" "-unattended" "-NoCrashDialog" "${EXTRA_ARGS[@]}" >>"$LOG_FILE" 2>&1
 
