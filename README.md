@@ -77,9 +77,10 @@ If you use the admin panel to launch a Linux dedicated server, set:
 - `Launch Working Dir` - folder containing `start_server.sh`
 - `Server File Path (Linux)` - full path to the packaged Linux server script or binary on the Linux host
 - `MultiHome IP` - optional bind address for the server NIC
-- `Script Args (JSON)` - arguments passed to the launcher script
+- `Script Args (JSON)` - arguments passed to the launcher script as a JSON array (e.g., `["{connectPort}", "{map}", "{maxPlayers}", "{serverName}", "{sessionId}"]`)
 If `Server File Path (Linux)` is provided, the admin form sends it as `OPENXR_SERVER_SCRIPT` in the launch environment.
 If `MultiHome IP` is provided, the launcher can forward it as `MULTIHOME_IP` so the Linux server binds to a specific interface.
+Placeholder values like `{sessionId}`, `{connectPort}`, `{map}`, etc. are automatically expanded before launching the process.
 ## Unreal setup
 In your Unreal project, use the dedicated-server flow from `XrMpGameInstance`.
 Set the registry values used by your game instance:
@@ -160,29 +161,92 @@ Example body:
 ```
 This keeps the registry in sync with the authoritative server-side player count and also refreshes the session heartbeat.
 ## Heartbeat client
-`heartbeat_client.py` is useful if you want a lightweight helper process to keep a session fresh and clean it up on shutdown.
+`heartbeat_client.py` is useful if you want a lightweight helper process to create a session, keep it fresh, and clean it up on shutdown.
 ```powershell
 python .\heartbeat_client.py `
   --base-url http://127.0.0.1:8080 `
   --token change-me `
+  --server-name "Teacher Session" `
+  --owner-name "On-Prem Server" `
   --connect-address 10.0.0.25 `
   --connect-port 7777 `
-  --server-name "Teacher Session" `
+  --max-players 16 `
   --heartbeat-interval 10
 ```
+
+Available options:
+- `--base-url` - Registry base URL (required)
+- `--token` - Bearer token for authentication (optional, defaults to empty)
+- `--server-name` - Display name for the server (default: "Dedicated Server")
+- `--owner-name` - Owner/operator name (default: "On-Prem Server")
+- `--connect-address` - IP address clients should connect to (required)
+- `--connect-port` - Port number (default: 7777)
+- `--max-players` - Maximum players allowed (default: 16)
+- `--current-players` - Initial player count (default: 0)
+- `--build-unique-id` - Build identifier (default: 1)
+- `--mode` - Session mode (default: "dedicated")
+- `--map` - Game map path (default: "/Game/VRTemplate/VRTemplateMap")
+- `--heartbeat-interval` - Heartbeat frequency in seconds (default: 10.0)
+- `--request-timeout` - HTTP timeout in seconds (default: 5)
 ## API responses
-### `GET /admin/sessions`
+
+### `POST /sessions`
+Creates a new session and optionally launches a server. Response includes full session details:
+```json
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "serverName": "Teacher Session",
+  "ownerName": "On-Prem Server",
+  "connectString": "10.0.0.25:7777",
+  "maxPlayers": 16,
+  "currentPlayers": 0,
+  "pingMs": -1,
+  "buildUniqueId": 1,
+  "mode": "dedicated",
+  "map": "/Game/VRTemplate/VRTemplateMap",
+  "launchPid": 12345,
+  "launchStatus": "running",
+  "launchExitCode": null,
+  "launchCommand": "/bin/bash /path/to/start_server.sh 7777 /Game/VRTemplate/VRTemplateMap 16 Teacher Session ...",
+  "lifecyclePolicy": "auto_close_when_empty",
+  "idleTimeoutSeconds": 900,
+  "emptySinceAt": null
+}
+```
+
+### `GET /sessions`
+Returns discoverable sessions (requires bearer token):
 ```json
 {
   "sessions": [
     {
-      "sessionId": "...",
+      "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+      "serverName": "Teacher Session",
+      "connectString": "10.0.0.25:7777",
+      "maxPlayers": 16,
+      "currentPlayers": 1,
+      "pingMs": 25,
+      ...other fields...
+    }
+  ]
+}
+```
+
+### `GET /admin/sessions`
+Returns detailed admin view with timestamps and stale-age data (requires bearer token):
+```json
+{
+  "sessions": [
+    {
+      "sessionId": "550e8400-e29b-41d4-a716-446655440000",
       "serverName": "Teacher Session",
       "connectString": "10.0.0.25:7777",
       "createdAt": "2026-04-07T16:45:00+00:00",
       "lastHeartbeatAt": "2026-04-07T16:45:09+00:00",
       "staleAgeSeconds": 9.13,
-      "isStale": false
+      "isStale": false,
+      "emptyAgeSeconds": 0.0,
+      ...other fields...
     }
   ],
   "ttlSeconds": 120,
@@ -190,20 +254,40 @@ python .\heartbeat_client.py `
 }
 ```
 ### `POST /sessions/{sessionId}/heartbeat`
+Keeps a session alive. Automatically updates timestamps and can include runtime stats.
 ```json
 {
-  "sessionId": "...",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
   "status": "heartbeat_updated",
   "currentPlayers": 5
 }
 ```
+
 ### `POST /sessions/{sessionId}/players`
+Updates player counts and refreshes the heartbeat automatically.
 ```json
 {
-  "sessionId": "...",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
   "status": "players_updated",
   "currentPlayers": 5,
   "maxPlayers": 16
+}
+```
+
+### `DELETE /sessions/{sessionId}`
+Removes a session and terminates any launched process.
+```json
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "deleted"
+}
+```
+
+### `GET /health`
+Simple health check endpoint (no authentication required).
+```json
+{
+  "status": "ok"
 }
 ```
 ## Test
