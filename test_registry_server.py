@@ -11,7 +11,6 @@ from urllib.request import Request, urlopen
 from registry_server import build_server
 
 
-# Integration tests exercise the real HTTP server instead of mocking request handlers.
 class RegistryServerApiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -36,7 +35,6 @@ class RegistryServerApiTests(unittest.TestCase):
         cls.server.server_close()
 
     def _request(self, method: str, path: str, data=None, auth=True):
-        # Shared JSON request helper keeps each test focused on behavior, not HTTP boilerplate.
         body = None
         headers = {"Accept": "application/json"}
         if data is not None:
@@ -65,14 +63,12 @@ class RegistryServerApiTests(unittest.TestCase):
             return response.getcode(), response.headers.get("Content-Type", ""), body
 
     def test_auth_is_required_for_sessions(self):
-        # Session routes are protected when a token is configured.
         with self.assertRaises(HTTPError) as ctx:
             self._request("GET", "/sessions", auth=False)
         self.assertEqual(ctx.exception.code, 401)
         ctx.exception.close()
 
     def test_create_list_heartbeat_delete_flow(self):
-        # Baseline lifecycle: create, list, heartbeat, then delete.
         status, created = self._request(
             "POST",
             "/sessions",
@@ -104,7 +100,6 @@ class RegistryServerApiTests(unittest.TestCase):
         self.assertEqual(deleted["status"], "deleted")
 
     def test_heartbeat_can_update_current_players(self):
-        # Heartbeat can carry runtime stats when the server wants to report them inline.
         status, created = self._request(
             "POST",
             "/sessions",
@@ -135,7 +130,6 @@ class RegistryServerApiTests(unittest.TestCase):
         self.assertEqual(delete_status, 200)
 
     def test_players_endpoint_updates_current_players(self):
-        # Player updates should be explicit and immediately reflected in admin data.
         status, created = self._request(
             "POST",
             "/sessions",
@@ -174,15 +168,108 @@ class RegistryServerApiTests(unittest.TestCase):
         delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
         self.assertEqual(delete_status, 200)
 
+    def test_player_events_endpoint_tracks_count_with_deltas(self):
+        status, created = self._request(
+            "POST",
+            "/sessions",
+            data={
+                "serverName": "Delta Session",
+                "connectAddress": "127.0.0.1",
+                "connectPort": 7782,
+                "currentPlayers": 0,
+                "maxPlayers": 10,
+            },
+        )
+        self.assertEqual(status, 201)
+        session_id = created["sessionId"]
+
+        first_status, first_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/player-events",
+            data={"event": "join", "eventId": "join-1", "maxPlayers": 10},
+        )
+        self.assertEqual(first_status, 200)
+        self.assertEqual(first_payload["status"], "player_event_applied")
+        self.assertEqual(first_payload["currentPlayers"], 1)
+
+        duplicate_status, duplicate_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/player-events",
+            data={"event": "join", "eventId": "join-1"},
+        )
+        self.assertEqual(duplicate_status, 200)
+        self.assertEqual(duplicate_payload["status"], "duplicate_event_ignored")
+        self.assertEqual(duplicate_payload["currentPlayers"], 1)
+
+        second_status, second_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/player-events",
+            data={"delta": 1, "eventId": "join-2"},
+        )
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second_payload["currentPlayers"], 2)
+        self.assertEqual(second_payload["playerCountSource"], "delta")
+
+        leave_status, leave_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/player-events",
+            data={"event": "leave", "eventId": "leave-1"},
+        )
+        self.assertEqual(leave_status, 200)
+        self.assertEqual(leave_payload["currentPlayers"], 1)
+
+        _, admin_listing = self._request("GET", "/admin/sessions")
+        row = next((s for s in admin_listing["sessions"] if s["sessionId"] == session_id), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["currentPlayers"], 1)
+        self.assertEqual(row["playerCountSource"], "delta")
+
+        delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
+        self.assertEqual(delete_status, 200)
+
+    def test_heartbeat_does_not_override_delta_count_without_authoritative_flag(self):
+        status, created = self._request(
+            "POST",
+            "/sessions",
+            data={
+                "serverName": "Delta Heartbeat Session",
+                "connectAddress": "127.0.0.1",
+                "connectPort": 7783,
+                "currentPlayers": 0,
+            },
+        )
+        self.assertEqual(status, 201)
+        session_id = created["sessionId"]
+
+        self._request("POST", f"/sessions/{session_id}/player-events", data={"event": "join", "eventId": "a"})
+        self._request("POST", f"/sessions/{session_id}/player-events", data={"event": "join", "eventId": "b"})
+
+        hb_status, hb_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/heartbeat",
+            data={"currentPlayers": 1},
+        )
+        self.assertEqual(hb_status, 200)
+        self.assertEqual(hb_payload["currentPlayers"], 2)
+
+        forced_status, forced_payload = self._request(
+            "POST",
+            f"/sessions/{session_id}/heartbeat",
+            data={"currentPlayers": 1, "authoritativePlayers": True},
+        )
+        self.assertEqual(forced_status, 200)
+        self.assertEqual(forced_payload["currentPlayers"], 1)
+
+        delete_status, _ = self._request("DELETE", f"/sessions/{session_id}")
+        self.assertEqual(delete_status, 200)
+
     def test_admin_page_is_served(self):
-        # The browser admin panel should load directly from the registry.
         status, content_type, body = self._request_text("GET", "/admin", auth=False)
         self.assertEqual(status, 200)
         self.assertIn("text/html", content_type)
         self.assertIn("OpenXrMp Dedicated Session Admin", body)
 
     def test_admin_sessions_contains_rich_metadata(self):
-        # Admin listings include timestamps and stale-age values for operators.
         status, created = self._request(
             "POST",
             "/sessions",
@@ -215,7 +302,6 @@ class RegistryServerApiTests(unittest.TestCase):
         self.assertGreaterEqual(match["staleAgeSeconds"], 0)
 
     def test_ttl_cleanup_removes_stale_sessions(self):
-        # Old non-running sessions should be removed by the TTL cleanup loop.
         short_lived_server, stop_event, cleanup_thread = build_server(
             host="127.0.0.1",
             port=0,
@@ -256,7 +342,6 @@ class RegistryServerApiTests(unittest.TestCase):
         short_lived_server.server_close()
 
     def test_create_can_launch_process_and_report_pid(self):
-        # Launching a helper process should store PID and session launch status.
         with tempfile.TemporaryDirectory() as temp_dir:
             marker_path = Path(temp_dir) / "launch_marker.txt"
             launcher_script = Path(temp_dir) / "launcher_test.py"
@@ -297,7 +382,6 @@ class RegistryServerApiTests(unittest.TestCase):
             self.assertEqual(delete_status, 200)
 
     def test_create_launch_passes_multihome_ip_to_env(self):
-        # MultiHome IP should be forwarded to the launched process as an env var.
         with tempfile.TemporaryDirectory() as temp_dir:
             marker_path = Path(temp_dir) / "multihome_marker.txt"
             launcher_script = Path(temp_dir) / "launcher_multihome.py"
@@ -339,7 +423,6 @@ class RegistryServerApiTests(unittest.TestCase):
             self.assertEqual(delete_status, 200)
 
     def test_create_launch_rejects_invalid_multihome_ip(self):
-        # Invalid bind addresses should fail fast before launch.
         with self.assertRaises(HTTPError) as bad_request:
             self._request(
                 "POST",
@@ -358,7 +441,6 @@ class RegistryServerApiTests(unittest.TestCase):
         bad_request.exception.close()
 
     def test_stale_age_increases_for_running_launched_sessions(self):
-        # Stale age should reflect real heartbeat age even if the server process is still alive.
         with tempfile.TemporaryDirectory() as temp_dir:
             launcher_script = Path(temp_dir) / "launcher_sleep.py"
             launcher_script.write_text(
@@ -393,7 +475,6 @@ class RegistryServerApiTests(unittest.TestCase):
             self.assertEqual(delete_status, 200)
 
     def test_auto_close_when_empty_removes_launched_session(self):
-        # Auto-close should remove an idle empty session after the timeout expires.
         short_lived_server, stop_event, cleanup_thread = build_server(
             host="127.0.0.1",
             port=0,

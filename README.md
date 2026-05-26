@@ -10,6 +10,7 @@ It includes:
 - `GET /sessions` - return discoverable sessions for Unreal clients.
 - `POST /sessions/{sessionId}/heartbeat` - keep a session alive.
 - `POST /sessions/{sessionId}/players` - update `currentPlayers` and optional `maxPlayers`.
+- `POST /sessions/{sessionId}/player-events` - apply player-count deltas (`join`/`leave` or integer `delta`) on the API side.
 - `DELETE /sessions/{sessionId}` - remove a session row.
 - `GET /health` - health check.
 - `GET /admin` - browser admin panel.
@@ -17,6 +18,8 @@ It includes:
 ### Lifecycle behavior
 - `heartbeat` updates `lastHeartbeatAt`.
 - `players` updates player counts and also refreshes the heartbeat.
+- `player-events` applies API-side count deltas and supports idempotency via `eventId`.
+- When a session is in delta mode, heartbeat `currentPlayers` values are ignored unless `authoritativePlayers=true` is provided.
 - Sessions launched through the registry stay visible while the launched process is still running.
 - `DELETE` removes the row and terminates the launched process if one exists.
 - Two lifecycle policies are supported when creating a session:
@@ -91,7 +94,7 @@ Typical flow:
 1. Host creates a session with `POST /sessions`.
 2. Clients query `GET /sessions`.
 3. Clients join using the returned `connectString`.
-4. The dedicated server reports player count changes with `POST /sessions/{sessionId}/players`.
+4. The dedicated server reports player count changes with `POST /sessions/{sessionId}/player-events` (recommended) or `POST /sessions/{sessionId}/players`.
 ## Session creation examples
 ### Create a session without launching a process
 ```json
@@ -160,6 +163,40 @@ Example body:
 }
 ```
 This keeps the registry in sync with the authoritative server-side player count and also refreshes the session heartbeat.
+
+For API-side counting (recommended when join/leave timing is noisy), send player events:
+```http
+POST /sessions/{sessionId}/player-events
+Content-Type: application/json
+Authorization: Bearer <token>
+```
+
+Example join payload:
+```json
+{
+  "event": "join",
+  "eventId": "join-4f7b6a57",
+  "maxPlayers": 16
+}
+```
+
+Example leave payload:
+```json
+{
+  "event": "leave",
+  "eventId": "leave-4f7b6a57"
+}
+```
+
+You can also send an explicit integer delta instead of `event`:
+```json
+{
+  "delta": 1,
+  "eventId": "custom-delta-001"
+}
+```
+
+`eventId` is optional, but recommended for idempotency so retried events do not double-apply.
 ## Heartbeat client
 `heartbeat_client.py` is useful if you want a lightweight helper process to create a session, keep it fresh, and clean it up on shutdown.
 ```powershell
@@ -271,6 +308,18 @@ Updates player counts and refreshes the heartbeat automatically.
   "status": "players_updated",
   "currentPlayers": 5,
   "maxPlayers": 16
+}
+```
+
+### `POST /sessions/{sessionId}/player-events`
+Applies API-side player-count deltas with optional idempotency.
+```json
+{
+  "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "player_event_applied",
+  "currentPlayers": 5,
+  "maxPlayers": 16,
+  "playerCountSource": "delta"
 }
 ```
 

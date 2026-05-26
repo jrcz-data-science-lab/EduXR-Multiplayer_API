@@ -245,7 +245,6 @@
       </div>
       <div class="toolbar">
         <button id="refreshBtn" class="btn">Refresh</button>
-        <button id="clearSavedApiBtn" class="btn">Clear Saved API Settings</button>
         <span id="status" class="status-text muted"></span>
       </div>
     </div>
@@ -313,48 +312,6 @@
     // Small utility helpers keep the request code short and easy to read.
     const byId = (id) => document.getElementById(id);
     const statusEl = byId("status");
-    const STORAGE_KEYS = {
-      baseUrl: "openxrmp.admin.baseUrl",
-      token: "openxrmp.admin.token"
-    };
-
-    function loadPersistedSettings() {
-      // Best-effort restore of operator settings from local storage.
-      try {
-        const savedBaseUrl = window.localStorage.getItem(STORAGE_KEYS.baseUrl) || "";
-        const savedToken = window.localStorage.getItem(STORAGE_KEYS.token) || "";
-        if (savedBaseUrl) {
-          byId("baseUrl").value = savedBaseUrl;
-        }
-        if (savedToken) {
-          byId("token").value = savedToken;
-        }
-      } catch (_) {
-        // Ignore storage failures (private mode, blocked storage, etc.).
-      }
-    }
-
-    function persistSetting(storageKey, value) {
-      try {
-        window.localStorage.setItem(storageKey, value);
-      } catch (_) {
-        // Ignore storage failures so core admin actions still work.
-      }
-    }
-
-    function clearPersistedApiSettings() {
-      try {
-        window.localStorage.removeItem(STORAGE_KEYS.baseUrl);
-        window.localStorage.removeItem(STORAGE_KEYS.token);
-      } catch (_) {
-        // Ignore storage failures so the UI can still be used.
-      }
-
-      byId("baseUrl").value = window.location.origin;
-      byId("token").value = "";
-      persistSetting(STORAGE_KEYS.baseUrl, byId("baseUrl").value);
-      setStatus("Cleared saved API settings", true);
-    }
 
     function getBaseUrl() {
       const value = byId("baseUrl").value.trim();
@@ -515,22 +472,9 @@
       }
     }
 
-    loadPersistedSettings();
-    if (!byId("baseUrl").value.trim()) {
-      byId("baseUrl").value = window.location.origin;
-      persistSetting(STORAGE_KEYS.baseUrl, byId("baseUrl").value);
-    }
-
-    byId("baseUrl").addEventListener("input", () => {
-      persistSetting(STORAGE_KEYS.baseUrl, byId("baseUrl").value.trim());
-    });
-    byId("token").addEventListener("input", () => {
-      persistSetting(STORAGE_KEYS.token, byId("token").value.trim());
-    });
-
+    byId("baseUrl").value = window.location.origin;
     // Wire up the one form toggle that changes another field.
     byId("refreshBtn").addEventListener("click", refresh);
-    byId("clearSavedApiBtn").addEventListener("click", clearPersistedApiSettings);
     byId("createBtn").addEventListener("click", createSession);
     byId("runNonstop").addEventListener("change", syncLifecycleInputs);
     syncLifecycleInputs();
