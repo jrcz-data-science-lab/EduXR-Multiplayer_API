@@ -597,6 +597,8 @@ def make_handler(store: SessionStore, bearer_token: str):
                 except ValueError as ex:
                     self._json_response(HTTPStatus.BAD_REQUEST, {"error": str(ex)})
                     return
+                # Debug: log created session and initial player count
+                print(f"[registry-debug] POST /sessions from {self.client_address[0]} payload={payload} -> created currentPlayers={created.current_players} sessionId={created.session_id}")
                 self._json_response(HTTPStatus.CREATED, store._record_to_wire(created))
                 return
 
@@ -617,6 +619,8 @@ def make_handler(store: SessionStore, bearer_token: str):
                 if not touched:
                     self._json_response(HTTPStatus.NOT_FOUND, {"error": "session_not_found"})
                     return
+                # Debug: log players update
+                print(f"[registry-debug] POST /sessions/{session_id}/players from {self.client_address[0]} payload={players_payload} -> currentPlayers={touched.current_players} maxPlayers={touched.max_players}")
                 self._json_response(
                     HTTPStatus.OK,
                     {
@@ -641,6 +645,8 @@ def make_handler(store: SessionStore, bearer_token: str):
                 if not touched:
                     self._json_response(HTTPStatus.NOT_FOUND, {"error": "session_not_found"})
                     return
+                # Debug: log heartbeat updates
+                print(f"[registry-debug] POST /sessions/{session_id}/heartbeat from {self.client_address[0]} payload={heartbeat_payload} -> currentPlayers={touched.current_players}")
                 self._json_response(
                     HTTPStatus.OK,
                     {
@@ -670,6 +676,8 @@ def make_handler(store: SessionStore, bearer_token: str):
                     return
 
                 touched, applied = event_result
+                # Debug: log player events (delta/join/leave)
+                print(f"[registry-debug] POST /sessions/{session_id}/player-events from {self.client_address[0]} payload={events_payload} -> applied={applied} currentPlayers={touched.current_players} playerCountSource={touched.player_count_source}")
                 self._json_response(
                     HTTPStatus.OK,
                     {
