@@ -11,6 +11,8 @@ It includes:
 - `POST /sessions/{sessionId}/heartbeat` - keep a session alive.
 - `POST /sessions/{sessionId}/players` - update `currentPlayers` and optional `maxPlayers`.
 - `POST /sessions/{sessionId}/player-events` - apply player-count deltas (`join`/`leave` or integer `delta`) on the API side.
+
+Note: As of 2026-05-28 the API-side `player-events` endpoint and accompanying server registration fixes were deployed to resolve player-count timing races.
 - `DELETE /sessions/{sessionId}` - remove a session row.
 - `GET /health` - health check.
 - `GET /admin` - browser admin panel.
